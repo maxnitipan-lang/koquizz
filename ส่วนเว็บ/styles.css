@@ -1,0 +1,89 @@
+body {
+            font-family: 'Plus Jakarta Sans', 'Kanit', sans-serif;
+            background-color: #030712;
+            overflow-x: hidden;
+        }
+
+        /* Modern Glassmorphic panel effect */
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.45);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        /* Modern Neon Glow Effects */
+        .glow-cyan {
+            box-shadow: 0 0 25px rgba(6, 182, 212, 0.35);
+        }
+        .glow-amber {
+            box-shadow: 0 0 30px rgba(251, 191, 36, 0.45);
+        }
+
+        /* Character unlock toast: pop-in from top, centered horizontally */
+        @keyframes unlock-toast-in {
+            0% { opacity: 0; transform: translate(-50%, -40px) scale(0.8); }
+            55% { opacity: 1; transform: translate(-50%, 6px) scale(1.04); }
+            100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+        }
+        @keyframes unlock-toast-out {
+            0% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -24px) scale(0.9); }
+        }
+        #toastCharUnlock {
+            left: 50%;
+            transform: translate(-50%, -40px);
+        }
+        .toast-unlock-show {
+            animation: unlock-toast-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+        }
+        .toast-unlock-hide {
+            animation: unlock-toast-out 0.35s ease-in both;
+        }
+
+        /* Seamless premium high-tech glowing background grid */
+        .cyber-grid {
+            background-size: 40px 40px;
+            background-image: linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                              linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        }
+
+        /* Smooth scrollbars for premium UX */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #030712;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #1f2937;
+            border-radius: 9999px;
+            border: 2px solid #030712;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #f43f5e;
+        }
+
+        /* Animation for shake hit on elements */
+        @keyframes subtle-shake {
+            0%, 100% { transform: translateX(0) translateY(0); }
+            15% { transform: translateX(-6px) translateY(3px); }
+            30% { transform: translateX(6px) translateY(-3px); }
+            45% { transform: translateX(-4px) translateY(-1px); }
+            60% { transform: translateX(4px) translateY(1px); }
+            75% { transform: translateX(-1px) translateY(1px); }
+        }
+        .shake-hit {
+            animation: subtle-shake 0.3s cubic-bezier(.36,.07,.19,.97) both;
+        }
+
+        /* Damage text float up effect */
+        @keyframes damage-float-up {
+            0% { opacity: 0; transform: translateY(10px) scale(0.6); filter: blur(2px); }
+            20% { opacity: 1; transform: translateY(-30px) scale(1.3); filter: blur(0px); }
+            80% { opacity: 1; transform: translateY(-60px) scale(1); }
+            100% { opacity: 0; transform: translateY(-80px) scale(0.8); filter: blur(1px); }
+        }
+        .dmg-float {
+            animation: damage-float-up 1.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+        }
