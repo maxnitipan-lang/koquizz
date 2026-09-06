@@ -680,13 +680,11 @@
 
         // ===== ข้อมูลแมพ (ย้ายมาจากหน้าล็อกอิน/สมัครสมาชิก) =====
         // ใช้แสดงในการ์ดเลือกแมพบนหน้าเลือกฮีโร่
-        // TODO: map2/map3 ยังไม่ได้กำหนดฉาก 3D — แก้ title/name/desc/icon/theme
-        // ของ map2/map3 ตรงนี้เมื่อสร้างแมพใหม่เพิ่ม (icon ใช้ชื่อคลาส Font Awesome,
-        // theme ใช้สีของ Tailwind เช่น cyan/rose/amber/emerald ฯลฯ)
+        // icon ใช้ชื่อคลาส Font Awesome, theme ใช้สีของ Tailwind เช่น cyan/rose/amber/emerald ฯลฯ
         const MAP_INFO = {
             map1: { title: "❄️ ทะเลทรายน้ำแข็งอาถรรพ์", name: "แมพที่ 1", desc: "ทะเลทรายน้ำแข็งอาถรรพ์", icon: "fa-snowflake", theme: "cyan" },
             map2: { title: "⚡ วิหารสายฟ้าทองสวรรค์", name: "แมพที่ 2", desc: "วิหารสายฟ้าทองสวรรค์", icon: "fa-bolt", theme: "amber" },
-            map3: { title: "🗺️ แมพที่ 3 (รอเพิ่มข้อมูล)", name: "แมพที่ 3", desc: "ยังไม่ได้กำหนดแมพ", icon: "fa-map", theme: "amber" }
+            map3: { title: "⚔️ ลานกระบี่เทพเซียน", name: "แมพที่ 3", desc: "ลานประลองกระบี่เทพเซียนใต้แสงจันทร์และสายฟ้าศักดิ์สิทธิ์", icon: "fa-khanda", theme: "cyan" }
         };
 
         // วาดการ์ดเลือกแมพในหน้าเลือกฮีโร่ (ข้างๆ การ์ดตัวละคร)
@@ -695,11 +693,38 @@
             if (!container) return;
             container.innerHTML = "";
 
-            const currentMap = gameState.user.selectedMap || "map1";
+            let currentMap = gameState.user.selectedMap || "map1";
+
+            // กันไว้เผื่อผู้เล่นเคยเลือกแมพที่ตอนนี้ไม่มีอยู่แล้ว/ถูกปิดไว้ (เช่นเคย
+            // เลือก map3 ไว้ตอนที่ยังเปิดใช้งานอยู่) ให้สลับกลับไป map1 อัตโนมัติเงียบๆ
+            // (ไม่ต้องรอผู้เล่นมากดเลือกใหม่เอง)
+            if (!MAP_INFO[currentMap] || MAP_INFO[currentMap].disabled) {
+                currentMap = "map1";
+                gameState.user.selectedMap = currentMap;
+                persistCurrentUserProgress();
+            }
 
             Object.keys(MAP_INFO).forEach(mapKey => {
                 const map = MAP_INFO[mapKey];
                 const isSelected = currentMap === mapKey;
+
+                if (map.disabled) {
+                    // การ์ด "เร็วๆ นี้" -- คงช่องไว้ในเลย์เอาต์เดิม แต่กดเลือกไม่ได้
+                    // และไม่มี checkmark/ทีมสีของแมพให้เข้าใจผิดว่าเลือกได้
+                    const lockedHtml = `
+                    <div class="flex items-center gap-3 bg-slate-900/40 rounded-2xl border-2 border-dashed border-slate-800 p-3.5 opacity-60 cursor-not-allowed select-none">
+                        <div class="w-10 h-10 flex-shrink-0 rounded-xl flex items-center justify-center border border-slate-800 bg-slate-950/60 text-slate-600">
+                            <i class="fa-solid ${map.icon} text-sm"></i>
+                        </div>
+                        <div class="text-left flex-1 min-w-0">
+                            <span class="text-[9px] font-bold uppercase tracking-widest text-slate-600">${map.name}</span>
+                            <p class="text-[11px] font-bold text-slate-500 leading-tight truncate">เร็วๆ นี้</p>
+                        </div>
+                        <i class="fa-solid fa-lock text-slate-600 text-xs flex-shrink-0"></i>
+                    </div>`;
+                    container.insertAdjacentHTML("beforeend", lockedHtml);
+                    return;
+                }
 
                 // Uniform horizontal card: icon left, text right, checkmark only when selected.
                 // Same shape whether selected or not, so the eye doesn't have to parse 2 layouts.
@@ -721,7 +746,7 @@
 
         // เลือกแมพสนามรบ (บันทึกลงบัญชีทันที ไม่ต้องรอกดยืนยัน)
         function selectMap(mapKey) {
-            if (!MAP_INFO[mapKey]) return;
+            if (!MAP_INFO[mapKey] || MAP_INFO[mapKey].disabled) return;
             playSynthSound('click');
 
             gameState.user.selectedMap = mapKey;

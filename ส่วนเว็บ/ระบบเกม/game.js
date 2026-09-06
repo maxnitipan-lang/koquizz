@@ -57,7 +57,7 @@
                 username: "",
                 title: "นักกุนซือเรียนรู้",
                 selectedCharacter: "yuehan",
-                selectedMap: "map1", // 'map1' = ice arena (default), 'map2' = lava celestial arena, 'map3' = lightning god arena
+                selectedMap: "map1", // 'map1' = ice arena (default), 'map2' = lava celestial arena
                 xp: 0,
                 level: 1,
                 clearedSubStages: JSON.parse(localStorage.getItem("koquizz_cleared_modern")) || []
@@ -86,6 +86,11 @@
         
         // 3D Scene Global variables
         let scene, camera, renderer, threeDContainer;
+        // Optional bloom post-processing pipeline (Sword Deity Stage / map3 only -- see
+        // init3DArena()'s isSword branch in map.js). Stays null on maps/browsers that don't
+        // build it, and animate3D() below falls back to a plain renderer.render() whenever
+        // composer is null, so nothing else in the game depends on this existing.
+        let composer = null, bloomPass = null;
         let playerGroup, bossGroup;
         let pointLight; // Reaction flash light
         let damageParticles = [];
@@ -95,7 +100,7 @@
         // Background 3D Elements for richer visual ambiance (Frost Celestial Arena, ported from ice mage arena)
         let godRay, godRayInner, moon, moonGlow, backgroundSparks;
         let slashArcMesh, shockwaveRingMesh; // Yuehan slash overlay + boss counter shockwave (built in map.js)
-        let serpentSegments = []; // Giant voxel serpent decoration (built in map.js, used by map2/map3)
+        let serpentSegments = []; // Giant voxel serpent decoration (built in map.js, used by map2)
         let serpentGroup; // Parent group wrapping all serpent segments, so it can orbit as one
 
         // --- Ice-God Arena background cast (map1 only, built in map.js) ---
@@ -115,6 +120,16 @@
         let goldSparkPoints, goldSparkCount = 0; // reverse-gravity gold sparks rising from the pool
         let goldLightningBolts = []; // transient upward lightning bolt lines + flash lights
         let goldSkyFlashLight;
+
+        // --- Sword Deity Stage background cast (map3 only, built in map.js) ---
+        let swordStarfield; // distant background starfield points
+        let swordRunesRing; // floating glowing rune ring around the stage floor
+        let swordMountains = []; // { mesh, ring, aura, light, speed, pulseOffset } glowing golden peaks
+        let swordAltarGroup; // central floating divine sword (userData.baseY for bobbing)
+        let swordFlyingBlades = []; // { mesh, angle, radius, speed, yOffset } orbiting the platform rim
+        let swordQiPoints, swordQiCount = 0; // swirling cyan/gold qi energy particles around the altar
+        let swordLightningBolts = []; // { line, light, life, decay } transient sky-to-altar lightning strikes
+
         let mouseX = 0, mouseY = 0;
         let targetPlayerPos = new THREE.Vector3(-3.5, -0.5, 0);
         let targetBossPos = new THREE.Vector3(3.5, -0.5, 0);
@@ -470,6 +485,75 @@
                 }
             }
 
+            // --- Sword Deity Stage background cast (map3 only) ---
+            if (gameState.currentArenaMap === 'map3') {
+                // Floating rune ring: slow rotation + gentle breathing scale
+                if (swordRunesRing) {
+                    swordRunesRing.rotation.z = time * 0.4;
+                    const s = 1 + Math.sin(time * 2) * 0.015;
+                    swordRunesRing.scale.set(s, s, s);
+                }
+
+                // Central sword altar bobbing up and down
+                if (swordAltarGroup) {
+                    swordAltarGroup.position.y = swordAltarGroup.userData.baseY + Math.sin(time * 1.2) * 0.15;
+                }
+
+                // Flying blades orbiting the platform rim with a light flutter
+                swordFlyingBlades.forEach(fb => {
+                    fb.angle += fb.speed + Math.sin(time + fb.yOffset) * 0.003;
+                    fb.mesh.position.x = Math.cos(fb.angle) * fb.radius;
+                    fb.mesh.position.z = Math.sin(fb.angle) * fb.radius;
+                    fb.mesh.position.y = -1.35 + Math.sin(time * 2 + fb.yOffset) * 0.08;
+                    fb.mesh.rotation.y = -fb.angle + Math.PI / 2;
+                    fb.mesh.rotation.z = Math.PI / 3;
+                });
+
+                // Glowing background mountains: slow spin + pulsing holy aura/light
+                swordMountains.forEach(mtn => {
+                    mtn.mesh.rotation.y += mtn.speed;
+                    if (mtn.ring) mtn.ring.rotation.z += 0.01;
+                    const pulse = Math.sin(time * 2 + mtn.pulseOffset) * 0.2 + 0.8;
+                    if (mtn.aura) mtn.aura.material.opacity = 0.3 * pulse;
+                    if (mtn.light) mtn.light.intensity = 3.0 * pulse;
+                });
+
+                // Random divine lightning striking down onto the altar
+                if (Math.random() < 0.004 && typeof spawnSwordLightningBolt === "function") {
+                    spawnSwordLightningBolt();
+                }
+                for (let i = swordLightningBolts.length - 1; i >= 0; i--) {
+                    const bolt = swordLightningBolts[i];
+                    bolt.life -= bolt.decay;
+                    if (bolt.life <= 0) {
+                        scene.remove(bolt.line);
+                        if (bolt.light) scene.remove(bolt.light);
+                        bolt.line.geometry.dispose();
+                        bolt.line.material.dispose();
+                        swordLightningBolts.splice(i, 1);
+                    } else {
+                        bolt.line.material.opacity = bolt.life;
+                        // Only the main strike (index 0 of its bundle) carries a flash light --
+                        // the forked branch lines are lit by that same flash rather than each
+                        // spawning their own light, so the bundle doesn't over-brighten the altar.
+                        if (bolt.light) bolt.light.intensity = bolt.life * 10;
+                    }
+                }
+
+                // Swirling qi energy particles rising/falling gently around the altar
+                if (swordQiPoints) {
+                    swordQiPoints.rotation.y += 0.0025;
+                    const qPos = swordQiPoints.geometry.attributes.position.array;
+                    for (let i = 0; i < qPos.length; i += 3) {
+                        qPos[i + 1] += Math.sin(time * 2.5 + qPos[i]) * 0.004;
+                    }
+                    swordQiPoints.geometry.attributes.position.needsUpdate = true;
+                }
+
+                // Distant starfield: very gentle parallax rotation
+                if (swordStarfield) swordStarfield.rotation.y = time * 0.01;
+            }
+
             // Animate rising frost embers
             if (backgroundSparks) {
                 const positions = backgroundSparks.geometry.attributes.position.array;
@@ -672,7 +756,11 @@
                 }
             }
 
-            renderer.render(scene, camera);
+            if (composer) {
+                composer.render();
+            } else {
+                renderer.render(scene, camera);
+            }
         }
 
         window.addEventListener("resize", () => {
@@ -682,6 +770,7 @@
                 camera.aspect = w / h;
                 camera.updateProjectionMatrix();
                 renderer.setSize(w, h);
+                if (composer) composer.setSize(w, h);
             }
         });
 

@@ -13,8 +13,12 @@
 // camera/platform/player/boss layout (camera z, arena platform radius,
 // qilin pacing range, etc. all landed on/near the same numbers that were
 // already tuned into game.js's animate3D() ice-map section).
-// map2 / map3 = still empty placeholders, waiting for their own scenes
-// (see the generic "else" branch inside init3DArena below).
+//
+// map3 = "Sword Deity Stage & Floating Blade Altar" (ลานกระบี่เทพเซียน), ported
+// from the user-supplied standalone reference scene ("Sword Deity Stage"
+// three.js file): every position/size/radius below is the reference's value
+// divided by ~10, same pattern used for map1 above, so it lines up with this
+// file's shared compact battle-arena camera/platform/player/boss layout.
 // ===========================================
 
 function init3DArena(mapKey) {
@@ -22,6 +26,7 @@ function init3DArena(mapKey) {
     gameState.currentArenaMap = mapKey;
     const isIce = (mapKey === 'map1'); // Ice-God Arena
     const isGold = (mapKey === 'map2'); // Golden Dragon Thunder Arena, ported from "thunder_god_background_gold_version.html"
+    const isSword = (mapKey === 'map3'); // Sword Deity Stage — ลานกระบี่เทพเซียน
 
     threeDContainer = document.getElementById("threeDContainer");
     if (!threeDContainer) return;
@@ -37,15 +42,23 @@ function init3DArena(mapKey) {
     } else if (isGold) {
         scene.background = new THREE.Color(0x050300);
         scene.fog = new THREE.FogExp2(0x150f02, 0.03);
+    } else if (isSword) {
+        // Sword Deity Stage: deep mystical night void + cyan-blue ethereal fog
+        // (reference density 0.0045 * 10, since the arena world is 1/10 scale)
+        scene.background = new THREE.Color(0x03050d);
+        scene.fog = new THREE.FogExp2(0x060a17, 0.045);
     } else {
         scene.background = new THREE.Color(0x0f172a);
         scene.fog = new THREE.FogExp2(0x0f172a, 0.02);
     }
 
-    // Reference uses a wide establishing fov (60); pulled narrower + camera dollied
-    // closer here (see arenaCameraZ below) so the two fighters read clearly in the
-    // small in-game viewport instead of being dwarfed by the mountains/qilin.
-    camera = new THREE.PerspectiveCamera(isIce ? 45 : (isGold ? 42 : 40), w / h, 0.1, 150);
+    // Reference uses a wide establishing fov (60) at a roughly 16:9 viewport
+    // (~91.6 deg horizontal). This game's battle box is much wider/shorter
+    // (~2.8:1), so matching that same horizontal FOV needs a narrower
+    // vertical fov (~40) -- fov 60 here would blow the horizontal FOV out to
+    // ~117 deg and fisheye-distort the mountains into the frame (map1/map2
+    // use their own narrower fovs for the same reason, tuned independently).
+    camera = new THREE.PerspectiveCamera(isIce ? 45 : (isGold ? 42 : (isSword ? 40 : 40)), w / h, 0.1, 150);
     camera.position.set(0, 2.5, 9.5);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -53,11 +66,45 @@ function init3DArena(mapKey) {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    renderer.toneMapping = (isIce || isGold) ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
-    renderer.toneMappingExposure = isIce ? 1.2 : (isGold ? 1.3 : 1.0);
+    renderer.toneMapping = (isIce || isGold || isSword) ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
+    renderer.toneMappingExposure = isIce ? 1.2 : (isGold ? 1.3 : (isSword ? 1.1 : 1.0));
     threeDContainer.appendChild(renderer.domElement);
 
+    // Bloom post-processing (Sword Deity Stage / map3 only, ported from the reference scene's
+    // UnrealBloomPass) -- gives the glowing sword, rune ring, and qi particles real light-bleed
+    // instead of flat emissive materials. Guarded behind typeof checks: the addon <script> tags
+    // in koquizz.html can fail to load (offline, CDN blocked, etc.), and this must never break
+    // the other maps or crash the battle when that happens.
+    // Dispose the previous composer's render targets first -- init3DArena() can run again on a
+    // fresh map3 battle without a full page reload, and EffectComposer allocates its own
+    // WebGLRenderTargets that aren't freed just by dropping the JS reference.
+    if (composer && typeof composer.dispose === "function") composer.dispose();
+    composer = null; bloomPass = null;
+    if (isSword && typeof THREE.EffectComposer === "function" &&
+        typeof THREE.RenderPass === "function" && typeof THREE.UnrealBloomPass === "function") {
+        try {
+            composer = new THREE.EffectComposer(renderer);
+            composer.addPass(new THREE.RenderPass(scene, camera));
+            // Strength/radius/threshold tuned down from the reference's 1.4/0.5/0.15. Bloom is a
+            // single full-screen pass with no per-object control (see chat explanation), so
+            // *every* bright emissive in the scene -- sword, mountains, rune ring, gold guard,
+            // qi particles -- blooms by the same amount. 0.9/0.25 overexposed the whole arena
+            // (mountains and platform included, not just the sword); 0.55/0.35 fixed that but
+            // read a bit flat/dim compared to the reference. Nudged back up to 0.7 strength /
+            // 0.3 threshold: closer to the reference's punch on the sword fuller, rune lines,
+            // and lightning, while the slightly-raised threshold still keeps the platform and
+            // mountains from blowing out.
+            bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(w, h), 0.7, 0.4, 0.3);
+            composer.addPass(bloomPass);
+        } catch (e) {
+            console.warn("[SwordStage] Bloom post-processing unavailable, falling back to plain render.", e);
+            composer = null;
+            bloomPass = null;
+        }
+    }
+
     godRay = null; godRayInner = null; moon = null; moonGlow = null;
+    if (typeof swordLightningBolts !== "undefined") swordLightningBolts.length = 0;
 
     if (isIce) {
         // Lighting values/positions taken straight from the reference (divided by 10 for position only).
@@ -111,6 +158,48 @@ function init3DArena(mapKey) {
         goldSkyFlashLight = new THREE.PointLight(0xfff3cc, 0, 30);
         goldSkyFlashLight.position.set(0, 4, -1);
         scene.add(goldSkyFlashLight);
+    } else if (isSword) {
+        // Sword Deity Stage: mystical cyan moonlight + glowing altar core
+        // (reference position 60,120,-40 / 10, intensities kept close)
+        const ambient = new THREE.AmbientLight(0x0e172a, 2.2);
+        scene.add(ambient);
+
+        const moonLight = new THREE.DirectionalLight(0x6495ed, 2.0);
+        moonLight.position.set(6, 12, -4);
+        moonLight.castShadow = true;
+        moonLight.shadow.mapSize.width = 1024;
+        moonLight.shadow.mapSize.height = 1024;
+        moonLight.shadow.bias = -0.001;
+        // r128's default DirectionalLight shadow-camera frustum is only ~+-5 units wide, but
+        // the background mountains sit 11-16 units out (buildSwordScenery()) -- without this
+        // they fall outside the frustum and silently render with no shadow at all. Widened to
+        // ~2x the farthest mountain distance/height so everything in the scene stays covered.
+        moonLight.shadow.camera.near = 1;
+        moonLight.shadow.camera.far = 40;
+        moonLight.shadow.camera.left = -20;
+        moonLight.shadow.camera.right = 20;
+        moonLight.shadow.camera.top = 20;
+        moonLight.shadow.camera.bottom = -20;
+        scene.add(moonLight);
+
+        // Secondary fill light (reference's fillLight) -- softens the side of the platform/
+        // fighters facing away from the moon so they don't go flat black there. Intensity kept
+        // lower than the reference's 0.8 since this arena's ambient (2.2) already runs brighter
+        // than the reference's (1.4); matching 0.8 here would wash the shadow side out instead.
+        const fillLight = new THREE.DirectionalLight(0x1a2e4a, 0.5);
+        fillLight.position.set(-5, -4, 5);
+        scene.add(fillLight);
+
+        // Combat hit-flash light (game.js recolors this every frame during battle reactions)
+        pointLight = new THREE.PointLight(0x00f3ff, 2.2, 25);
+        pointLight.position.set(0, 3, 2);
+        scene.add(pointLight);
+
+        // Core glow rising from the central floating sword altar
+        // (ground-relative reference y=1.2, shifted by the same -1.6 platform-top offset)
+        const coreLight = new THREE.PointLight(0x00f3ff, 4.5, 15);
+        coreLight.position.set(0, -0.4, -3.5);
+        scene.add(coreLight);
     } else {
         const ambient = new THREE.AmbientLight(0xffffff, 1.2);
         scene.add(ambient);
@@ -133,8 +222,8 @@ function init3DArena(mapKey) {
     } else if (isGold) {
         buildGoldClouds();
         buildGoldPillars();
-    } else {
-        // TODO: พื้นหลังของแมพ 3 ใหม่ ใส่ตรงนี้
+    } else if (isSword) {
+        buildSwordScenery();
     }
 
     if (isIce) {
@@ -151,6 +240,8 @@ function init3DArena(mapKey) {
         platformBase.receiveShadow = true;
         scene.add(platformBase);
         buildGoldPool();
+    } else if (isSword) {
+        buildSwordStage();
     } else {
         const platformMat = new THREE.MeshStandardMaterial({
             color: 0x111827,
@@ -208,6 +299,7 @@ function init3DArena(mapKey) {
     // these two drift apart, the fighters end up sitting higher on screen
     // than the other maps and their heads get covered by the HP-bar HUD
     // panel docked at the top of the viewport.
+    // Sword Deity Stage: fighters stand on the platform like map2, no lift needed.
     arenaCameraLiftY = isIce ? 1.8 : 0;
     arenaCameraZ = isIce ? 9.2 : 9.5;
     playerGroup.position.copy(targetPlayerPos);
@@ -281,6 +373,33 @@ function init3DArena(mapKey) {
         }
         addGoldFighterGlow(targetPlayerPos.x, 0xffdd88);
         addGoldFighterGlow(targetBossPos.x, 0xffb347);
+    } else if (isSword) {
+        // Sword Deity Stage: icy-cyan vs warm-gold key spotlights + grounding glow,
+        // matching the reference's cyan sword-glow / gold accent palette.
+        const playerSpot = new THREE.SpotLight(0x9fe0ff, 5.5, 14, Math.PI / 5, 0.45, 1.2);
+        playerSpot.position.set(targetPlayerPos.x, targetPlayerPos.y + 4, targetPlayerPos.z + 3.5);
+        playerSpot.target.position.set(targetPlayerPos.x, targetPlayerPos.y, targetPlayerPos.z);
+        scene.add(playerSpot);
+        scene.add(playerSpot.target);
+
+        const bossSpot = new THREE.SpotLight(0xffcb47, 5.5, 14, Math.PI / 5, 0.45, 1.2);
+        bossSpot.position.set(targetBossPos.x, targetBossPos.y + 4, targetBossPos.z + 3.5);
+        bossSpot.target.position.set(targetBossPos.x, targetBossPos.y, targetBossPos.z);
+        scene.add(bossSpot);
+        scene.add(bossSpot.target);
+
+        function addSwordFighterGlow(x, color) {
+            const glowGeo = new THREE.RingGeometry(0.9, 2.1, 32);
+            const glowMat = new THREE.MeshBasicMaterial({
+                color, transparent: true, opacity: 0.4, side: THREE.DoubleSide, blending: THREE.AdditiveBlending
+            });
+            const glow = new THREE.Mesh(glowGeo, glowMat);
+            glow.rotation.x = -Math.PI / 2;
+            glow.position.set(x, -1.75, 0);
+            scene.add(glow);
+        }
+        addSwordFighterGlow(targetPlayerPos.x, 0x00f3ff);
+        addSwordFighterGlow(targetBossPos.x, 0xffcb47);
     }
 
     // Decorative background cast (player/boss are built separately by startBattle())
@@ -290,8 +409,8 @@ function init3DArena(mapKey) {
         buildIceQilin();
     } else if (isGold) {
         buildGoldDragon();
-    } else {
-        // TODO: มอนสเตอร์/สัตว์ประกอบฉากของแมพ 3 ใหม่ ใส่ตรงนี้
+    } else if (isSword) {
+        buildSwordAltarScene();
     }
 
     // Track mouse
@@ -899,6 +1018,418 @@ function spawnGoldLightningBolt() {
     if (goldSkyFlashLight) {
         goldSkyFlashLight.intensity = 5 + Math.random() * 4;
         goldSkyFlashLight.color.setHex(Math.random() > 0.4 ? 0xffcc00 : 0xffffff);
+    }
+}
+
+// ===========================================
+// Sword Deity Stage (map3 background cast) — "ลานกระบี่เทพเซียน"
+// Ported from the user-supplied standalone reference scene at this file's
+// shared compact arena scale (reference positions/sizes divided by ~10,
+// same pattern as buildIceMountains()/buildGoldDragon() above). Per-frame
+// animation for all of this lives in game.js's animate3D() under the
+// "Sword Deity Stage background cast (map3 only)" block.
+// ===========================================
+
+// Rune-carved circular stage floor + floating glyph ring — this map's
+// platform (called instead of the generic fallback platform / buildIceArenaDais()
+// / gold platform+pool, from the isSword branch of init3DArena() above).
+// Soft round glow sprite (radial gradient canvas -> texture) for point-sprite materials.
+// Plain THREE.PointsMaterial with no `map` renders every point as a hard-edged square, which
+// reads as flat/artificial for the starfield and qi particles -- the reference scene builds
+// this exact gradient for its energyParticles. Shared here so both particle systems below get
+// the same soft, glowing look instead of only qi particles having it.
+function generateSwordGlowSprite() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 32; canvas.height = 32;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 32, 32);
+    return new THREE.CanvasTexture(canvas);
+}
+
+function buildSwordStage() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = 1024;
+    const ctx = canvas.getContext('2d');
+
+    // Base dark slate
+    ctx.fillStyle = '#080d1a';
+    ctx.fillRect(0, 0, 1024, 1024);
+
+    const cx = 512, cy = 512;
+
+    // Glowing celestial lines
+    ctx.strokeStyle = '#00d2ff';
+    ctx.lineWidth = 5;
+    ctx.shadowColor = '#00f3ff';
+    ctx.shadowBlur = 16;
+
+    // Concentric circles
+    for (let r = 200; r <= 480; r += 40) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    // Bagua trigrams
+    for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+        for (let j = 0; j < 3; j++) {
+            const radius = 300 + j * 30;
+            ctx.beginPath();
+            if ((i + j) % 2 === 0) {
+                ctx.moveTo(-40, -radius);
+                ctx.lineTo(40, -radius);
+            } else {
+                ctx.moveTo(-40, -radius);
+                ctx.lineTo(-10, -radius);
+                ctx.moveTo(10, -radius);
+                ctx.lineTo(40, -radius);
+            }
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    // Yin-yang center (cyan glow & dark obsidian)
+    ctx.fillStyle = '#00f3ff';
+    ctx.beginPath(); ctx.arc(cx, cy, 120, Math.PI / 2, Math.PI * 1.5); ctx.fill();
+    ctx.fillStyle = '#050a14';
+    ctx.beginPath(); ctx.arc(cx, cy, 120, Math.PI * 1.5, Math.PI / 2); ctx.fill();
+    ctx.fillStyle = '#050a14';
+    ctx.beginPath(); ctx.arc(cx, cy - 60, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#00f3ff';
+    ctx.beginPath(); ctx.arc(cx, cy + 60, 30, 0, Math.PI * 2); ctx.fill();
+
+    const runeTexture = new THREE.CanvasTexture(canvas);
+    runeTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+
+    const stageGeo = new THREE.CylinderGeometry(5, 5.3, 0.4, 64);
+    const stageMat = new THREE.MeshStandardMaterial({
+        color: 0x151b26,
+        roughness: 0.5,
+        metalness: 0.4,
+        map: runeTexture,
+        emissive: 0x00d2ff,
+        emissiveMap: runeTexture,
+        emissiveIntensity: 1.2
+    });
+    const stage = new THREE.Mesh(stageGeo, stageMat);
+    stage.position.y = -1.8;
+    stage.receiveShadow = true;
+    scene.add(stage);
+
+    // Floating glowing runes ring
+    const ringGeo = new THREE.TorusGeometry(5.5, 0.06, 16, 100);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x00d2ff, transparent: true, opacity: 0.85 });
+    swordRunesRing = new THREE.Mesh(ringGeo, ringMat);
+    swordRunesRing.rotation.x = Math.PI / 2;
+    swordRunesRing.position.y = -1.55;
+    scene.add(swordRunesRing);
+}
+
+// Distant starfield + glowing golden xianxia mountains ringing the stage
+// (equivalent to buildIceMountains() / buildGoldClouds()+buildGoldPillars()).
+function buildSwordScenery() {
+    const starsGeo = new THREE.BufferGeometry();
+    const starsCount = 4000; // matches reference's starsCount exactly (was 2200)
+    const starPos = new Float32Array(starsCount * 3);
+    for (let i = 0; i < starsCount * 3; i++) {
+        starPos[i] = (Math.random() - 0.5) * 140;
+    }
+    starsGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    const starsMat = new THREE.PointsMaterial({
+        size: 0.12, color: 0x99ccff, map: generateSwordGlowSprite(), transparent: true,
+        opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false
+    });
+    swordStarfield = new THREE.Points(starsGeo, starsMat);
+    scene.add(swordStarfield);
+
+    const mtnMaterial = new THREE.MeshStandardMaterial({
+        color: 0x2b2219, emissive: 0x9e6b18, emissiveIntensity: 0.75,
+        roughness: 0.3, metalness: 0.7, flatShading: true
+    });
+    const mtnAuraMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffcb47, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending, side: THREE.BackSide
+    });
+    const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xffd700, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending
+    });
+
+    swordMountains = [];
+    const numMountains = 14;
+    for (let i = 0; i < numMountains; i++) {
+        const radius = 1.6 + Math.random() * 1.8;
+        const height = 6 + Math.random() * 7;
+        const geometry = new THREE.ConeGeometry(radius, height, 7, 5);
+
+        const posAttribute = geometry.attributes.position;
+        const v = new THREE.Vector3();
+        for (let j = 0; j < posAttribute.count; j++) {
+            v.fromBufferAttribute(posAttribute, j);
+            const noiseAmplitude = (v.y + height / 2) * 0.15;
+            v.x += (Math.random() - 0.5) * noiseAmplitude;
+            v.z += (Math.random() - 0.5) * noiseAmplitude;
+            posAttribute.setXYZ(j, v.x, v.y, v.z);
+        }
+        geometry.computeVertexNormals();
+
+        const mountain = new THREE.Mesh(geometry, mtnMaterial);
+
+        const auraMesh = new THREE.Mesh(geometry.clone(), mtnAuraMaterial);
+        auraMesh.scale.set(1.09, 1.06, 1.09);
+        mountain.add(auraMesh);
+
+        const mtnRingGeo = new THREE.TorusGeometry(radius * 1.3, 0.07, 8, 36);
+        const mtnRing = new THREE.Mesh(mtnRingGeo, ringMat);
+        mtnRing.rotation.x = Math.PI / 2 + (Math.random() - 0.5) * 0.4;
+        mtnRing.position.y = (Math.random() - 0.5) * (height * 0.3);
+        mountain.add(mtnRing);
+
+        const mtnLight = new THREE.PointLight(0xffb326, 3.2, 14);
+        mountain.add(mtnLight);
+
+        // Arc placement (same pattern as buildGoldPillars()'s -π..0 arc) keeps
+        // every mountain planted well behind the arena instead of scattered
+        // around a full 360° ring — the shared camera sits fixed at roughly
+        // (0, 2.5, 9.5), so a full-ring spread could place a mountain right on
+        // top of the camera itself (rendering from inside its glow shell,
+        // which blanks the whole view). This arc guarantees z stays well
+        // beyond the camera at all times.
+        const angle = (i / (numMountains - 1)) * Math.PI - Math.PI;
+        const distance = 11 + Math.random() * 5;
+        mountain.position.x = Math.cos(angle) * distance;
+        mountain.position.z = Math.sin(angle) * (distance * 0.6) - 10;
+        mountain.position.y = -2 + (Math.random() - 0.5) * 3 + (Math.random() > 0.5 ? height * 0.3 : -height * 0.1);
+        mountain.rotation.y = Math.random() * Math.PI;
+        mountain.castShadow = true;
+        mountain.receiveShadow = true;
+
+        scene.add(mountain);
+        swordMountains.push({
+            mesh: mountain, ring: mtnRing, aura: auraMesh, light: mtnLight,
+            speed: (Math.random() * 0.0015 - 0.00075),
+            pulseOffset: Math.random() * Math.PI * 2
+        });
+    }
+}
+
+// Central floating sword altar + orbiting flying blades + rising qi particles
+// (this map's centerpiece, equivalent to buildIceQilin() / buildGoldDragon()).
+function buildSwordAltarScene() {
+    buildSwordAltar();
+    buildSwordFlyingBlades();
+    buildSwordQiParticles();
+}
+
+// The divine floating sword, planted behind the platform center as the
+// stage's centerpiece (reference values / 10, position pulled back to z=-3.5
+// so it doesn't sit between the two fighters).
+function buildSwordAltar() {
+    const swordGroup = new THREE.Group();
+
+    const bladeMat = new THREE.MeshPhysicalMaterial({
+        color: 0xd9f2ff, metalness: 0.95, roughness: 0.1, clearcoat: 1.0, clearcoatRoughness: 0.1,
+        reflectivity: 1.0, emissive: 0x002233, emissiveIntensity: 0.5
+    });
+    const goldMat = new THREE.MeshPhysicalMaterial({
+        color: 0xe0b246, metalness: 0.9, roughness: 0.25, emissive: 0x442b00, emissiveIntensity: 0.8
+    });
+
+    const bladeGeo = new THREE.BoxGeometry(0.4, 4, 0.06);
+    const pos = bladeGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+        if (pos.getY(i) > 1.9) pos.setX(i, pos.getX(i) * 0.1);
+    }
+    bladeGeo.computeVertexNormals();
+    const blade = new THREE.Mesh(bladeGeo, bladeMat);
+    blade.position.y = 2.5;
+    blade.castShadow = true;
+    blade.receiveShadow = true;
+    swordGroup.add(blade);
+
+    const fullerGeo = new THREE.BoxGeometry(0.05, 3.8, 0.07);
+    const fuller = new THREE.Mesh(fullerGeo, new THREE.MeshBasicMaterial({ color: 0x00f3ff }));
+    fuller.position.y = 2.4;
+    swordGroup.add(fuller);
+
+    const guardGeo = new THREE.BoxGeometry(1.2, 0.3, 0.2);
+    const guard = new THREE.Mesh(guardGeo, goldMat);
+    guard.position.y = 0.5;
+    guard.castShadow = true;
+    swordGroup.add(guard);
+
+    const guardDecoGeo = new THREE.ConeGeometry(0.15, 0.8, 4);
+    const guardDeco1 = new THREE.Mesh(guardDecoGeo, goldMat);
+    guardDeco1.rotation.z = Math.PI / 2;
+    guardDeco1.position.set(-0.6, 0.5, 0);
+    swordGroup.add(guardDeco1);
+    const guardDeco2 = new THREE.Mesh(guardDecoGeo, goldMat);
+    guardDeco2.rotation.z = -Math.PI / 2;
+    guardDeco2.position.set(0.6, 0.5, 0);
+    swordGroup.add(guardDeco2);
+
+    const hiltGeo = new THREE.CylinderGeometry(0.1, 0.1, 1.0, 16);
+    const hiltMat = new THREE.MeshStandardMaterial({ color: 0x111622, roughness: 0.6 });
+    const hilt = new THREE.Mesh(hiltGeo, hiltMat);
+    hilt.position.y = -0.1;
+    swordGroup.add(hilt);
+
+    const pommelGeo = new THREE.IcosahedronGeometry(0.2, 2);
+    const pommel = new THREE.Mesh(pommelGeo, goldMat);
+    pommel.position.y = -0.7;
+    swordGroup.add(pommel);
+
+    // Ground-relative reference y=10 (/10=1.0) — this arena's platform top sits
+    // at y=-1.6 (not 0 like the reference's stage), so the altar's actual
+    // world-space y needs that -1.6 added back on, or it floats ~1.6 units
+    // too high above the platform.
+    swordGroup.position.set(0, -0.6, -3.5);
+    swordGroup.userData = { baseY: -0.6 };
+    scene.add(swordGroup);
+    swordAltarGroup = swordGroup;
+}
+
+// A ring of smaller swords orbiting the platform's edge, tilted and facing
+// along the circle they trace (reference numSwords=24/radius=52 → count
+// trimmed a bit for performance, radius / 10 to sit right at the platform rim).
+function buildSwordFlyingBlades() {
+    swordFlyingBlades = [];
+    const numBlades = 24; // matches reference's numSwords exactly (was 22)
+    const radius = 5.2;
+
+    const bladeMat = new THREE.MeshStandardMaterial({
+        color: 0xa8e5ff, metalness: 0.85, roughness: 0.2, emissive: 0x002233
+    });
+    const guardMat = new THREE.MeshStandardMaterial({ color: 0xdfb15b });
+
+    for (let i = 0; i < numBlades; i++) {
+        const bladeGroup = new THREE.Group();
+        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.6, 0.01), bladeMat);
+        blade.position.y = 0.3;
+        bladeGroup.add(blade);
+        const guard = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.04, 0.02), guardMat);
+        bladeGroup.add(guard);
+
+        const angle = (i / numBlades) * Math.PI * 2;
+        bladeGroup.position.x = Math.cos(angle) * radius;
+        bladeGroup.position.z = Math.sin(angle) * radius;
+        // Ground-relative reference y=2.5 (/10=0.25) + this platform's actual
+        // top at y=-1.6, so the blades graze the rim instead of hovering high
+        // above it (see the same fix on the altar's y above).
+        bladeGroup.position.y = -1.35 + Math.sin(angle * 3) * 0.08;
+        bladeGroup.rotation.z = Math.PI / 3;
+        bladeGroup.rotation.y = -angle + Math.PI / 2;
+
+        scene.add(bladeGroup);
+        swordFlyingBlades.push({ mesh: bladeGroup, angle: angle, radius: radius, speed: 0.015, yOffset: i });
+    }
+}
+
+// Swirling cyan/gold qi energy particles rising around the altar.
+function buildSwordQiParticles() {
+    swordQiCount = 2200; // matches reference's particleCount exactly (was 1200)
+    const geo = new THREE.BufferGeometry();
+    const posArr = new Float32Array(swordQiCount * 3);
+    const colArr = new Float32Array(swordQiCount * 3);
+
+    const colorBase = new THREE.Color(0x00f3ff);
+    const colorAlt = new THREE.Color(0xdfb15b);
+
+    for (let i = 0; i < swordQiCount; i++) {
+        const r = 0.8 + Math.random() * 3.4;
+        const theta = Math.random() * Math.PI * 2;
+        // Ground-relative reference range (/10 = center 2, spread ±4.25),
+        // shifted down by the platform top offset (-1.6) same as the altar/blades.
+        const y = (Math.random() - 0.5) * 8.5 + 0.4;
+        posArr[i * 3] = r * Math.cos(theta);
+        posArr[i * 3 + 1] = y;
+        posArr[i * 3 + 2] = r * Math.sin(theta);
+
+        const mixed = colorBase.clone().lerp(colorAlt, Math.random() * 0.5);
+        colArr[i * 3] = mixed.r; colArr[i * 3 + 1] = mixed.g; colArr[i * 3 + 2] = mixed.b;
+    }
+    geo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
+
+    swordQiPoints = new THREE.Points(geo, new THREE.PointsMaterial({
+        size: 0.09, vertexColors: true, map: generateSwordGlowSprite(), blending: THREE.AdditiveBlending,
+        depthWrite: false, transparent: true, opacity: 0.85
+    }));
+    scene.add(swordQiPoints);
+}
+
+// Spawns one transient lightning STRIKE toward the sword altar -- a bundle of
+// branching lines (not just one straight bolt), matching the reference's forked-
+// lightning look: a shared jagged main path, with extra branch lines that fork off
+// harder in the lower half. Called from game.js's animate3D() at a random chance
+// each frame; all lines in the bundle are pushed into the same swordLightningBolts
+// array/decay pattern used by game.js, so no changes were needed there beyond
+// tolerating branch entries that have no light of their own.
+function spawnSwordLightningBolt() {
+    const startX = (Math.random() - 0.5) * 3;
+    const startY = 12;
+    const startZ = -3.5 + (Math.random() - 0.5) * 3;
+
+    const targetX = startX + (Math.random() - 0.5) * 1;
+    const targetY = 1.0;
+    const targetZ = startZ;
+
+    const segments = 14;
+    const mainPath = [new THREE.Vector3(startX, startY, startZ)];
+    for (let i = 1; i < segments; i++) {
+        const ratio = i / segments;
+        const tx = startX + (targetX - startX) * ratio;
+        const ty = startY + (targetY - startY) * ratio;
+        const tz = startZ + (targetZ - startZ) * ratio;
+        mainPath.push(new THREE.Vector3(
+            tx + (Math.random() - 0.5) * 0.32,
+            ty + (Math.random() - 0.5) * 0.08,
+            tz + (Math.random() - 0.5) * 0.32
+        ));
+    }
+    mainPath.push(new THREE.Vector3(targetX, targetY, targetZ));
+
+    // 1 main bolt + 3 forked branches per strike (reference uses 5 lines total).
+    const branchCount = 4;
+    let strikeFlash = null;
+    for (let b = 0; b < branchCount; b++) {
+        const points = mainPath.map((p, i) => {
+            // Branch 0 is the main bolt (no extra jitter, follows mainPath exactly).
+            let jitter = b === 0 ? 0 : (Math.random() - 0.5) * 0.35;
+            // Branches 2+ fork away harder once past the midpoint, giving the
+            // bundle a proper forked-lightning silhouette instead of parallel lines.
+            if (b > 1 && i > segments / 2) jitter += (Math.random() - 0.5) * 1.6;
+            return new THREE.Vector3(p.x + jitter, p.y, p.z + jitter);
+        });
+
+        const boltGeom = new THREE.BufferGeometry().setFromPoints(points);
+        const boltMat = new THREE.LineBasicMaterial({
+            color: 0xe0f7ff, transparent: true, blending: THREE.AdditiveBlending
+        });
+        const boltLine = new THREE.Line(boltGeom, boltMat);
+        scene.add(boltLine);
+
+        // Only the main bolt gets a flash light -- 4 separate PointLights per strike
+        // would over-brighten the altar and add avoidable per-frame light-shader cost.
+        if (b === 0) {
+            strikeFlash = new THREE.PointLight(0xe0f7ff, 10, 8);
+            strikeFlash.position.set(targetX, targetY + 0.5, targetZ);
+            scene.add(strikeFlash);
+        }
+
+        swordLightningBolts.push({
+            line: boltLine,
+            light: b === 0 ? strikeFlash : null,
+            life: 1.0,
+            decay: 0.1 + Math.random() * 0.06
+        });
     }
 }
 
